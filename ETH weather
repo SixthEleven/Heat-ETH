@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Multicoin Wallet Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bip39@3.0.4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bitcoinjs-lib@6.1.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.73.3/lib/index.iife.min.js"></script>
+  <style>
+    body { background: #111; color: #0f0; font-family: monospace; padding: 20px; }
+    button { font-size: 16px; padding: 10px 20px; margin: 5px 10px 10px 0; }
+    pre { white-space: pre-wrap; max-height: 600px; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #0f0; }
+  </style>
+</head>
+<body>
+  <h2>Multicoin Wallet Generator (ETH, BTC, BNB, LTC, SOL, USDT)</h2>
+  <button id="generateBtn">Generate Multi-Coin Wallet</button>
+  <pre id="output">Click the button to generate a multi-coin wallet...</pre>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('generateBtn').addEventListener('click', generateAll);
+    });
+
+    async function generateAll() {
+      const output = document.getElementById('output');
+      output.textContent = "Generating...\n";
+
+      const mnemonic = bip39.generateMnemonic();
+      const seed = await bip39.mnemonicToSeed(mnemonic);
+
+      // Ethereum / BNB / USDT-ERC20
+      const ethWallet = ethers.Wallet.fromMnemonic(mnemonic);
+      const ethAddress = ethWallet.address;
+
+      // Bitcoin
+      const bitcoin = bitcoinjs;
+      const btcRoot = bitcoin.bip32.fromSeed(seed);
+      const btcChild = btcRoot.derivePath("m/44'/0'/0'/0/0");
+      const { address: btcAddress } = bitcoin.payments.p2pkh({ pubkey: btcChild.publicKey });
+
+      // BNB (same derivation as ETH)
+      const bnbAddress = ethAddress;
+
+      // Litecoin (LTC, similar to BTC with version prefix)
+      const ltcNetwork = {
+        messagePrefix: '\x19Litecoin Signed Message:\n',
+        bech32: 'ltc',
+        bip32: { public: 0x019da462, private: 0x019d9cfe },
+        pubKeyHash: 0x30,
+        scriptHash: 0x32,
+        wif: 0xb0
+      };
+      const ltcRoot = bitcoin.bip32.fromSeed(seed, ltcNetwork);
+      const ltcChild = ltcRoot.derivePath("m/44'/2'/0'/0/0");
+      const { address: ltcAddress } = bitcoin.payments.p2pkh({ pubkey: ltcChild.publicKey, network: ltcNetwork });
+
+      // Solana
+      const solKeypair = solanaWeb3.Keypair.fromSeed(seed.slice(0, 32));
+      const solAddress = solKeypair.publicKey.toString();
+
+      output.textContent =
+        `Mnemonic: ${mnemonic}\n\n` +
+        `Ethereum / BNB / USDT Address: ${ethAddress}\n` +
+        `Bitcoin Address:              ${btcAddress}\n` +
+        `Litecoin Address:            ${ltcAddress}\n` +
+        `Solana Address:              ${solAddress}\n\n` +
+        `Fetching balances...\n`;
+
+      const balances = await fetchBalances(ethAddress, btcAddress, ltcAddress, solAddress);
+      output.textContent += balances;
+    }
+
+    async function fetchBalances(ethAddr, btcAddr, ltcAddr, solAddr) {
+      let result = '';
+
+      // ETH & USDT via Etherscan
+      const ETHERSCAN_KEY = '4IRQUKDGF6Q7RBN2167MFE9PRK6WPXPZF2';
+      const ethProvider = new ethers.providers.EtherscanProvider('homestead', ETHERSCAN_KEY);
+      try {
+        const balance = await ethProvider.getBalance(ethAddr);
+        result += `ETH Balance: ${ethers.utils.formatEther(balance)} ETH\n`;
+      } catch { result += `ETH Balance: error\n`; }
+
+      // BTC via Blockstream API
+      try {
+        const r = await fetch(`https://blockstream.info/api/address/${btcAddr}`);
+        const data = await r.json();
+        result += `BTC Balance: ${data.chain_stats.funded_txo_sum / 1e8} BTC\n`;
+      } catch { result += `BTC Balance: error\n`; }
+
+      // LTC via SoChain API
+      try {
+        const r = await fetch(`https://sochain.com/api/v2/get_address_balance/LTC/${ltcAddr}`);
+        const data = await r.json();
+        result += `LTC Balance: ${data.data.confirmed_balance} LTC\n`;
+      } catch { result += `LTC Balance: error\n`; }
+
+      // SOL via Solana API
+      try {
+        const conn = new solanaWeb3.Connection(solanaWeb3.clusterApiUrl('mainnet-beta'));
+        const solBalance = await conn.getBalance(new solanaWeb3.PublicKey(solAddr));
+        result += `SOL Balance: ${(solBalance / 1e9).toFixed(6)} SOL\n`;
+      } catch { result += `SOL Balance: error\n`; }
+
+      return result;
+    }
+  </script>
+</body>
+</html>
